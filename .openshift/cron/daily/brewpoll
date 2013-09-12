@@ -1,0 +1,3 @@
+#!/bin/bash
+
+nohup $HOME/app-root/runtime/repo/brewpoll.sh > $OPENSHIFT_PYTHON_LOG_DIR/brewpoll_logfile 2>&1 &

@@ -1,0 +1,4 @@
+source ~/python/virtenv/bin/activate
+pushd ~/app-root/runtime/repo/koji
+make install
+popd
