@@ -34,7 +34,8 @@ default_config = '%s/app-root/data/brewpoll.json'%os.environ['HOME']
 opt_parser = argparse.ArgumentParser()
 opt_parser.add_argument('-d', '--debug', action='store_true', help='Enable debugging output')
 opt_parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
-opt_parser.add_argument('-c', '--config', default=default_config, type=argparse.FileType('r'), help='Specify a config file')
+# opt_parser.add_argument('-c', '--config', default=default_config, type=argparse.FileType('r'), help='Specify a config file')
+opt_parser.add_argument('-c', '--config', type=argparse.FileType('r'), help='Specify a config file')
 
 MIN_WIDTH = 40
 MAX_WIDTH = 80
@@ -46,6 +47,7 @@ try:
 except IOError as ee:
     if 2 == ee.errno:
         sys.stderr.write("Could not open configuration file: %s\n"%ee.filename)
+        sys.stderr.write(opt_parser.format_usage())
     sys.exit(1)
 
 def verbose(txt):
@@ -61,7 +63,18 @@ def output(txt):
     sys.stdout.write(msg)
     return msg
 
-config   = json.load(opts.config)
+try:
+    config = json.load(opts.config)
+except AttributeError:
+    try:                        # There's gotta be a better way...
+        cfg_file = open(default_config, 'r')
+        config = json.load(cfg_file)
+    except IOError as ee:
+        if 2 == ee.errno:
+            sys.stderr.write("Could not open configuration file: %s\n"%ee.filename)
+            sys.stderr.write(opt_parser.format_usage())
+        sys.exit(1)
+
 set_defaults(config)
 
 verbose("Using base url %s"%config['base_url'])
@@ -98,14 +111,14 @@ for pkg_tag in config['tags']:
     for pkg_build in config['packages'][pkg_tag]:
     # for arch in ['x86_64', 'noarch']:
         build = pkg_build['upstream_build'][0]
-        pkg = pkg_build['OSE_pkg'][0]
-        pkg_nvr = "%s-%s-%s"%tuple(pkg_build['OSE_pkg'])
+        pkg = pkg_build['our_pkg'][0]
+        pkg_nvr = "%s-%s-%s"%tuple(pkg_build['our_pkg'])
         debug("session.getLatestBuilds(%s, %s, %s)"%(pkg_tag, None, build))
         res = session.getLatestBuilds(pkg_tag, None, build)
         if res:
             debug(pprint.pformat(res))
-            if not (res[0]['version'] == pkg_build['OSE_pkg'][1] 
-                    and res[0]['release'] == pkg_build['OSE_pkg'][2]):
+            if not (res[0]['version'] == pkg_build['our_pkg'][1] 
+                    and res[0]['release'] == pkg_build['our_pkg'][2]):
                 out_of_date[pkg_tag].append([pkg_nvr, res[0]['nvr']])
             else:
                 up_to_date[pkg_tag].append([pkg_nvr, res[0]['nvr']])
