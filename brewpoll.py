@@ -5,6 +5,7 @@ import argparse
 import sys
 import os
 import smtplib
+import rpm
 from email.mime.text import MIMEText
 
 import pprint
@@ -117,8 +118,9 @@ for pkg_tag in config['tags']:
         res = session.getLatestBuilds(pkg_tag, None, build)
         if res:
             debug(pprint.pformat(res))
-            if not (res[0]['version'] == pkg_build['our_pkg'][1] 
-                    and res[0]['release'] == pkg_build['our_pkg'][2]):
+            our_vr = (None, pkg_build['our_pkg'][1], pkg_build['our_pkg'][2])
+            their_vr = (None, res[0]['version'], res[0]['release'])
+            if rpm.labelCompare(our_vr, their_vr) < 0:
                 out_of_date[pkg_tag].append([pkg_nvr, res[0]['nvr']])
             else:
                 up_to_date[pkg_tag].append([pkg_nvr, res[0]['nvr']])
