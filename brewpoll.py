@@ -88,12 +88,14 @@ verbose("Opening koji.ClientSession(%s, %s)"%(config['base_url'], koji_opts))
 session  = koji.ClientSession(config['base_url'], koji_opts)
 verbose("Koji session created")
 
-fmt = "Package: %s%s Build(s): %s"
-up_to_date  = {}
-out_of_date = {}
-
-local_time = time_run = time.strftime("%F %T %Z", time.localtime(config['time_run']))
-gmt_time = time_run = time.strftime("%F %T", time.gmtime(config['time_run']))
+fmt             = "Package: %s%s Build(s): %s"
+up_to_date      = {}
+out_of_date     = {}
+upstream_builds = {}
+our_builds      = {}
+our_pkgnames    = {}
+local_time      = time_run = time.strftime("%F %T %Z", time.localtime(config['time_run']))
+gmt_time        = time_run = time.strftime("%F %T", time.gmtime(config['time_run']))
 
 report = """\
 Report generated at local time: %s
@@ -103,27 +105,55 @@ Report generated at local time: %s
 
 # Check if version-release of upstream build is > version-release of
 # cooresponding OSE package
+# for pkg_tag in config['tags']:
+#     verbose("Checking package tag %s"%pkg_tag)
+#     if not up_to_date.has_key(pkg_tag):
+#         up_to_date[pkg_tag] = []
+#     if not out_of_date.has_key(pkg_tag):
+#         out_of_date[pkg_tag] = []
+#     for pkg_build in config['packages'][pkg_tag]:
+#     # for arch in ['x86_64', 'noarch']:
+#         build = pkg_build['upstream_build'][0]
+#         pkg = pkg_build['our_pkg'][0]
+#         pkg_nvr = "%s-%s-%s"%tuple(pkg_build['our_pkg'])
+#         debug("session.getLatestBuilds(%s, %s, %s)"%(pkg_tag, None, build))
+#         res = session.getLatestBuilds(pkg_tag, None, build)
+#         if res:
+#             debug(pprint.pformat(res))
+#             our_vr = (None, pkg_build['our_pkg'][1], pkg_build['our_pkg'][2])
+#             their_vr = (None, res[0]['version'], res[0]['release'])
+#             if rpm.labelCompare(our_vr, their_vr) < 0:
+#                 out_of_date[pkg_tag].append([pkg_nvr, res[0]['nvr']])
+#             else:
+#                 up_to_date[pkg_tag].append([pkg_nvr, res[0]['nvr']])
+#     debug("up to date:")
+#     debug(pprint.pformat(up_to_date))
+#     debug("out of date:")
+#     debug(pprint.pformat(out_of_date))
+
+
+def make_nvr(build):
+    return (build['package_name'], build['version'], build['release'])
+
+our_builds = dict([(x['package_name'], x) for x in
+                   session.listTagged(config['our_tag'], inherit=True, latest=True)])
+
 for pkg_tag in config['tags']:
     verbose("Checking package tag %s"%pkg_tag)
+    ublist = session.listTagged(pkg_tag, inherit=True, latest=True)
+    upstream_builds[pkg_tag] = dict([(x['package_name'], x) for x in
+                                     ublist if x['package_name'] in our_builds])
+    debug("upstream_builds: %s"%(pprint.pformat(upstream_builds)))
     if not up_to_date.has_key(pkg_tag):
         up_to_date[pkg_tag] = []
     if not out_of_date.has_key(pkg_tag):
         out_of_date[pkg_tag] = []
-    for pkg_build in config['packages'][pkg_tag]:
-    # for arch in ['x86_64', 'noarch']:
-        build = pkg_build['upstream_build'][0]
-        pkg = pkg_build['our_pkg'][0]
-        pkg_nvr = "%s-%s-%s"%tuple(pkg_build['our_pkg'])
-        debug("session.getLatestBuilds(%s, %s, %s)"%(pkg_tag, None, build))
-        res = session.getLatestBuilds(pkg_tag, None, build)
-        if res:
-            debug(pprint.pformat(res))
-            our_vr = (None, pkg_build['our_pkg'][1], pkg_build['our_pkg'][2])
-            their_vr = (None, res[0]['version'], res[0]['release'])
-            if rpm.labelCompare(our_vr, their_vr) < 0:
-                out_of_date[pkg_tag].append([pkg_nvr, res[0]['nvr']])
-            else:
-                up_to_date[pkg_tag].append([pkg_nvr, res[0]['nvr']])
+    for pkg_name, build in upstream_builds[pkg_tag].iteritems():
+        if rpm.labelCompare(make_nvr(our_builds[pkg_name]),
+                            make_nvr(build)) < 0:
+            out_of_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
+        else:
+            up_to_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
     debug("up to date:")
     debug(pprint.pformat(up_to_date))
     debug("out of date:")
@@ -141,7 +171,7 @@ report += output("")
 
 for pkg_tag in config['tags']:    
     report += output("Results for tag:      %s"%pkg_tag)
-    report += output("Packages checked:     %d"%len(config['packages'][pkg_tag]))
+    report += output("Packages checked:     %d"%len(our_builds))
     report += output("Packages in tag:      %d"%(len(up_to_date[pkg_tag]) + len(out_of_date[pkg_tag])))
     report += output("Packages up to date:  %d"%len(up_to_date[pkg_tag]))
     report += output("Packages out of date: %d"%len(out_of_date[pkg_tag]))
