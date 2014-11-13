@@ -17,11 +17,26 @@ def set_defaults(config):
         config['subj_line'] = subj_line
     config['time_run'] = time.time()
 
-def send_report(config, msg, total_out_of_date):
+def create_subject_line(total_out_of_date, critical_out_of_date):
     time_run = time.strftime("%F %T %Z", time.localtime(config['time_run']))
     subj_line = "%s Report generated %s"%(config['subj_line'], time_run)
     if 0 < total_out_of_date:
-        subj_line += " - %d packages out of date!"%total_out_of_date
+        subj_line += " - %d critical packages out of date"%critical_out_of_date
+        if 0 < critical_out_of_date:
+            subj_line += "! "
+        else:
+            subj_line += ". "
+        subj_line += "(%d total)"%total_out_of_date
+    return subj_line
+
+def send_report(config, msg, subj_line):
+    time_run = time.strftime("%F %T %Z", time.localtime(config['time_run']))
+    debug("Subject: %s" % subj_line)
+    debug('From: %s' % config['from_addr'])
+    debug('To: %s' % config['dest_addr'])
+    debug('')
+    if opts.dontsend:
+        return
     payload = MIMEText(msg)
     payload['Subject'] = subj_line
     payload['From'] = config['from_addr']
@@ -37,6 +52,7 @@ opt_parser.add_argument('-d', '--debug', action='store_true', help='Enable debug
 opt_parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
 # opt_parser.add_argument('-c', '--config', default=default_config, type=argparse.FileType('r'), help='Specify a config file')
 opt_parser.add_argument('-c', '--config', type=argparse.FileType('r'), help='Specify a config file')
+opt_parser.add_argument('-n', '--dontsend', action='store_true', help="Don't actually send the report via email")
 
 MIN_WIDTH = 40
 MAX_WIDTH = 80
@@ -91,6 +107,7 @@ verbose("Koji session created")
 fmt             = "Package: %s%s Build(s): %s"
 up_to_date      = {}
 out_of_date     = {}
+non_critical    = {}
 upstream_builds = {}
 our_builds      = {}
 our_pkgnames    = {}
@@ -135,11 +152,15 @@ Report generated at local time: %s
 def make_nvr(build):
     return (build['package_name'], build['version'], build['release'])
 
+verbose("Getting list of latest version builds in tag %s and inherited tags"%config['our_tag'])
 our_builds = dict([(x['package_name'], x) for x in
                    session.listTagged(config['our_tag'], inherit=True, latest=True)])
+verbose("%d builds to be checked from tag %s and inherited tags"%(len(our_builds), config['our_tag']))
 
 for pkg_tag in config['tags']:
     verbose("Checking package tag %s"%pkg_tag)
+    # I tried building ublist by querying individual package names,
+    # but querying for all packages and filtering is much faster
     ublist = session.listTagged(pkg_tag, inherit=True, latest=True)
     upstream_builds[pkg_tag] = dict([(x['package_name'], x) for x in
                                      ublist if x['package_name'] in our_builds])
@@ -148,33 +169,54 @@ for pkg_tag in config['tags']:
         up_to_date[pkg_tag] = []
     if not out_of_date.has_key(pkg_tag):
         out_of_date[pkg_tag] = []
+    if not non_critical.has_key(pkg_tag):
+        non_critical[pkg_tag] = []
     for pkg_name, build in upstream_builds[pkg_tag].iteritems():
         if rpm.labelCompare(make_nvr(our_builds[pkg_name]),
                             make_nvr(build)) < 0:
-            out_of_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
+            if 'non_critical' in config and pkg_name in config['non_critical']:
+                non_critical[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
+                # up_to_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
+            else:
+                out_of_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
         else:
             up_to_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
     debug("up to date:")
     debug(pprint.pformat(up_to_date))
     debug("out of date:")
     debug(pprint.pformat(out_of_date))
+    debug("non-critical:")
+    debug(pprint.pformat(non_critical))
 
-total_out_of_date = sum((len(ii) for ii in out_of_date.values()))
+critical_out_of_date = sum((len(ii) for ii in out_of_date.values()))
+total_out_of_date = sum((len(ii) for ii in non_critical.values())) + critical_out_of_date
 report += output("Summary")
-report += output("Total out of date:    %d"%total_out_of_date)
+report += output("Our tag name:                 %s"%config['our_tag'])
+report += output("Total packages in our tag:    %d"%len(our_builds))
+report += output("Total out of date:            %d"%total_out_of_date)
 width = 2+max((len(ii) for ii in config['tags']))
 for pkg_tag in config['tags']:
-    report += output("Out of date for tag:  %s:%s %d"%(pkg_tag, ' '*(width - len(pkg_tag)), len(out_of_date[pkg_tag])))
+    non_crit_out=""
+    if 0 < len(non_critical[pkg_tag]):
+        non_crit_out="(%d non-critical)"%len(non_critical[pkg_tag])
+    report += output("Out of date for tag:          %s:%s %d %s" %
+                     (pkg_tag,
+                      ' '*(width - len(pkg_tag)),
+                      len(out_of_date[pkg_tag]),
+                      non_crit_out))
 report += output("")
 report += output("="*MAX_WIDTH)
 report += output("")
 
 for pkg_tag in config['tags']:    
-    report += output("Results for tag:      %s"%pkg_tag)
-    report += output("Packages checked:     %d"%len(our_builds))
-    report += output("Packages in tag:      %d"%(len(up_to_date[pkg_tag]) + len(out_of_date[pkg_tag])))
-    report += output("Packages up to date:  %d"%len(up_to_date[pkg_tag]))
-    report += output("Packages out of date: %d"%len(out_of_date[pkg_tag]))
+    report += output("Results for tag:                      %s"%pkg_tag)
+    report += output("Packages matching OSE builds in tag:  %d" %
+                     (len(up_to_date[pkg_tag]) + len(out_of_date[pkg_tag]) + len(non_critical[pkg_tag])))
+    report += output("Packages up to date:                  %d"%len(up_to_date[pkg_tag]))
+    non_crit_out=""
+    if 0 < len(non_critical[pkg_tag]):
+        non_crit_out="(%d non-critical)"%len(non_critical[pkg_tag])
+    report += output("Packages out of date:                 %d %s"%(len(out_of_date[pkg_tag]), non_crit_out))
     report += output("")
     
     width = max([MIN_WIDTH,
@@ -186,16 +228,23 @@ for pkg_tag in config['tags']:
         report += output("-"*MAX_WIDTH)
         for ii in out_of_date[pkg_tag]:
             report += output(fmt%(ii[0], ' '*(width-len(ii[0])), ii[1]))
-            # print ii
+        for ii in non_critical[pkg_tag]:
+            report += output(fmt%(ii[0], ' '*(width-len(ii[0])-1)+'*', ii[1]))
         report += output("")
-    if up_to_date[pkg_tag]:
+    if up_to_date[pkg_tag] and opts.verbose:
         report += output("Up to date builds:")
         report += output("-"*MAX_WIDTH)
         for ii in up_to_date[pkg_tag]:
-            report += output(fmt%(ii[0], ' '*(width-len(ii[0])), ii[1]))
+            spacer = ' '*((width-len(ii[0])))
+            # if ii in non_critical[pkg_tag]:
+            #     spacer += '*'
+            # else:
+            #     spacer += ' '
+            utd_out = fmt%(ii[0], spacer, ii[1])
+            report += output(utd_out)
         report += output("")
     report += output("="*MAX_WIDTH)
     report += output("")
 
+send_report(config, report, create_subject_line(total_out_of_date, critical_out_of_date))
 debug(report)
-send_report(config, report, total_out_of_date)
