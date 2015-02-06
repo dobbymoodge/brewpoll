@@ -108,6 +108,7 @@ fmt             = "Package: %s%s Build(s): %s"
 up_to_date      = {}
 out_of_date     = {}
 non_critical    = {}
+blacklist       = {}
 upstream_builds = {}
 our_builds      = {}
 our_pkgnames    = {}
@@ -171,11 +172,15 @@ for pkg_tag in config['tags']:
         out_of_date[pkg_tag] = []
     if not non_critical.has_key(pkg_tag):
         non_critical[pkg_tag] = []
+    if not blacklist.has_key(pkg_tag):
+        blacklist[pkg_tag] = []
     for pkg_name, build in upstream_builds[pkg_tag].iteritems():
         if rpm.labelCompare(make_nvr(our_builds[pkg_name]),
                             make_nvr(build)) < 0:
             if 'non_critical' in config and pkg_name in config['non_critical']:
                 non_critical[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
+            if 'blacklist' in config and pkg_name in config['blacklist']:
+                blacklist[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
                 # up_to_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
             else:
                 out_of_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
@@ -187,6 +192,8 @@ for pkg_tag in config['tags']:
     debug(pprint.pformat(out_of_date))
     debug("non-critical:")
     debug(pprint.pformat(non_critical))
+    debug("blacklist:")
+    debug(pprint.pformat(blacklist))
 
 critical_out_of_date = sum((len(ii) for ii in out_of_date.values()))
 total_out_of_date = sum((len(ii) for ii in non_critical.values())) + critical_out_of_date
@@ -194,6 +201,7 @@ report += output("Summary")
 report += output("Our tag name:                 %s"%config['our_tag'])
 report += output("Total packages in our tag:    %d"%len(our_builds))
 report += output("Total out of date:            %d"%total_out_of_date)
+report += output("Blacklisted:                  %d"%len(blacklist.values()))
 width = 2+max((len(ii) for ii in config['tags']))
 for pkg_tag in config['tags']:
     non_crit_out=""
