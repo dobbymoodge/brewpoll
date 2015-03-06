@@ -179,7 +179,7 @@ for pkg_tag in config['tags']:
                             make_nvr(build)) < 0:
             if 'non_critical' in config and pkg_name in config['non_critical']:
                 non_critical[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
-            if 'blacklist' in config and pkg_name in config['blacklist']:
+            elif 'blacklist' in config and pkg_name in config['blacklist']:
                 blacklist[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
                 # up_to_date[pkg_tag].append([our_builds[pkg_name]['nvr'], build['nvr']])
             else:
