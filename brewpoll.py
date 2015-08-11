@@ -40,9 +40,12 @@ def send_report(config, msg, subj_line):
     payload = MIMEText(msg)
     payload['Subject'] = subj_line
     payload['From'] = config['from_addr']
-    payload['To'] = config['dest_addr']
+    if isinstance(config['dest_addr'], (str, unicode)):
+        payload['To'] = config['dest_addr']
+    else:
+        payload['To'] = ', '.join(config['dest_addr'])
     s = smtplib.SMTP(config['smtp_server'])
-    s.sendmail(config['from_addr'], [config['dest_addr']], payload.as_string())
+    s.sendmail(config['from_addr'], config['dest_addr'], payload.as_string())
     s.quit()
 
 default_config = '%s/app-root/data/brewpoll.json'%os.environ['HOME']
